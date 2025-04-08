@@ -49,7 +49,7 @@ resource "aws_lb" "blog_alb" {
   name               = "blog-alb"
   internal           = false
   load_balancer_type = "application"
-  security_groups    = [aws_security_group.blog_sg.id]
+  security_groups    = [module.blog_sg.security_group_id]
   subnets            = module.blog_vpc.public_subnets  # Public subnets from your VPC module
 
   enable_deletion_protection = false  # Set to true in production
