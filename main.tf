@@ -38,43 +38,57 @@ module "blog_autoscaling" {
   min_size            = 1
   max_size            = 2
   vpc_zone_identifier = module.blog_vpc.public_subnets
-  target_group_arns   = [module.blog_alb.target_groups[0].arn]
+  target_group_arns   = [aws_lb_target_group.blog_tg.arn]  # Directly use the TG ARN  
   security_groups     = [module.blog_sg.security_group_id]
   instance_type       = var.instance_type
   image_id            = data.aws_ami.app_ami.id
 }
 
-module "blog_alb" {
-  source = "terraform-aws-modules/alb/aws"
-  name    = "blog-alb"
-  vpc_id  = module.blog_vpc.vpc_id
-  subnets = module.blog_vpc.public_subnets
-  security_groups = [module.blog_sg.security_group_id]
+# ALB
+resource "aws_lb" "blog_alb" {
+  name               = "blog-alb"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.blog_sg.id]
+  subnets            = module.blog_vpc.public_subnets  # Public subnets from your VPC module
 
-listeners = {
-    http-listener = {
-      port     = 80
-      protocol = "HTTP"
-      forward = {
-        target_group_key = "blog-instance"
-      }
-    }
+  enable_deletion_protection = false  # Set to true in production
+}
+
+# Target Group for the ALB
+resource "aws_lb_target_group" "blog_tg" {
+  name_prefix = "blog-"  # AWS will append a random suffix
+  port        = 80
+  protocol    = "HTTP"
+  vpc_id      = module.blog_vpc.vpc_id
+  target_type = "instance"  # Matches your ASG's instance-based targets
+
+  health_check {
+    path                = "/"  # Adjust based on your app's health check endpoint
+    protocol            = "HTTP"
+    matcher             = "200"  # HTTP status code for healthy
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
   }
 
-  target_groups = {
-    blog-instance = {
-      name_prefix      = "blog"
-      protocol         = "HTTP"
-      port             = 80
-      target_type      = "instance"
-    }
-  }
-
-  tags = {
-    Environment = "dev"
+  lifecycle {
+    create_before_destroy = true  # Ensures new TG is created before old one is destroyed
   }
 }
 
+# Listener for the ALB
+resource "aws_lb_listener" "blog_listener" {
+  load_balancer_arn = aws_lb.blog_alb.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.blog_tg.arn
+  }
+}
 module "blog_sg" {
   source  = "terraform-aws-modules/security-group/aws"
   version = "5.3.0"
